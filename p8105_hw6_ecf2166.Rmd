@@ -53,17 +53,21 @@ fit_balt_log =
   baltimore_df |> 
   glm(resolved ~ victim_age + victim_sex + victim_race, data = _, family = binomial())
 
-fit_balt_log |> 
+fit_balt_log_table = fit_balt_log |> 
   broom::tidy() |> 
   mutate(
-    OR = exp(estimate),
-    CI_lower = exp(estimate - 1.96 * std.error),
-    CI_upper = exp(estimate + 1.96 * std.error)
+    or = exp(estimate),
+    ci_lower = exp(estimate - 1.96 * std.error),
+    ci_upper = exp(estimate + 1.96 * std.error)
   ) |> 
   filter(term == "victim_sexMale") |> 
-  select(term, log_OR = estimate, OR, CI_lower, CI_upper, p.value) |> 
-  knitr::kable(digits = 3)
+  select(term, log_or = estimate, or, ci_lower, ci_upper, p.value)
+  
+
+fit_balt_log_table |> knitr::kable(digits = 3)
 ```
+
+The adjusted OR for solving homicides comparing male to female victims is `r round(pull(fit_balt_log_table, or), 3)` (`r round(pull(fit_balt_log_table, ci_lower), 3)`, `r round(pull(fit_balt_log_table, ci_upper), 3)`) keeping the other variables fixed.
 
 ```{r}
 city_or_df = 
@@ -103,7 +107,7 @@ city_or_df |>
   theme(axis.text.y = element_text(size = 6))
 ```
 
-Albequerque, NM; Stockton, CA; Fresno, CA; and Nashville, TN are the only cities with ORs well above 1 for male vs female victims; however, all of their CIs include the null value of 1. Otherwise, all other cities have adjusted ORs at or below the null value of 1, indicating that the odds of a homicide being solved for male victims is lower than or equal to the odds of a homicide being solved for female victims. 
+Albuquerque, NM; Stockton, CA; Fresno, CA; and Nashville, TN are the only cities with ORs clearly above 1 for male vs female victims; however, all of their CIs include the null value of 1. Otherwise, all other cities have adjusted ORs at or below the null value of 1, indicating that the odds of a homicide being solved for male victims is lower than or equal to the odds of a homicide being solved for female victims. Many cities have CIs entirely below 1, indicating that homicides with male victims are significantly less likely to be solved for those cities in comparison to those with female victims.
 
 # Problem 2
 
@@ -136,7 +140,8 @@ r2_df =
 
 r2_df |> 
   ggplot(aes(x = r.squared)) + 
-  geom_density()
+  geom_density() + 
+  labs(x = "R squared")
 
 r2_ci = r2_df |> 
   summarize(
@@ -148,7 +153,7 @@ r2_ci = r2_df |>
 r2_ci
 ```
 
-The distribution of $r^2$ is slightly left skewed with a peak around 0.915, indicating the linear model fits the data well with a high correlation.
+The distribution of $r^2$ is slightly left skewed with a peak around 0.915, indicating approximately 91.5% of the variation in tmax is explained by the variation in tmin and prcp.
 
 The confidence interval of $r^2$ is (`r round(pull(r2_ci, ci_lb), 3)`, `r round(pull(r2_ci, ci_ub), 3)`). 
 
@@ -165,7 +170,8 @@ beta_ratio_df =
 
 beta_ratio_df |> 
   ggplot(aes(x = beta_ratio)) + 
-  geom_density()
+  geom_density() + 
+  labs(x = "Beta ratio")
 
 beta_ratio_ci = beta_ratio_df |> 
   summarize(
@@ -177,12 +183,13 @@ beta_ratio_ci = beta_ratio_df |>
 beta_ratio_ci
 ```
 
-The distribution of $\frac{\hat{\beta}_1}{\hat{\beta}_2}$ appears approximately normal, maybe a bit right skewed, but the distribution is so narrow due to the tails, I will make another plot restricting the x-axis to view the peak a bit better. 
+The distribution of $\frac{\hat{\beta}_1}{\hat{\beta}_2}$ has a very heavy left tail. Most of the 5,000 estimates are centered around 0 but it is hard to tell the distribution with the tails ranging from about -1,700,000 to about to 400,000. This is due to the fact that $\hat{\beta}_2$, the coefficience for precipitation, is close to 0 and changes sign across the boostrap samples. Thus, I will make another plot restricting the x-axis to look more closely at the results concentrated around 0. 
 
 ```{r}
 beta_ratio_df |> 
   ggplot(aes(x = beta_ratio)) + 
   geom_density() +
+  labs(x = "Beta ratio") +
   coord_cartesian(xlim = c(-50000, 50000))
 ```
 
@@ -193,37 +200,169 @@ The confidence interval of $\frac{\hat{\beta}_1}{\hat{\beta}_2}$ is (`r round(pu
 
 # Problem 3
 
-In this problem, you will analyze data gathered to understand the effects of several variables on a child’s birthweight. This dataset, available here, consists of roughly 4000 children and includes the following variables:
+```{r}
+birthweight = 
+  read_csv("data/birthweight.csv", show_col_types = FALSE) |> 
+  janitor::clean_names() |> 
+  mutate(
+    babysex = factor(babysex, levels = c(1, 2), labels = c("male", "female")),
+    frace = factor(frace, levels = c(1, 2, 3, 4, 8, 9),
+                   labels = c("white", "black", "asian", "puerto rican", "other", "unknown")),
+    mrace = factor(mrace, levels = c(1, 2, 3, 4, 8),
+                   labels = c("white", "black", "asian", "puerto rican", "other")),
+    malform = factor(malform, levels = c(0, 1), labels = c("absent", "present"))
+  )
 
-babysex: baby’s sex (male = 1, female = 2)
-bhead: baby’s head circumference at birth (centimeters)
-blength: baby’s length at birth (centimeters)
-bwt: baby’s birth weight (grams)
-delwt: mother’s weight at delivery (pounds)
-fincome: family monthly income (in hundreds, rounded)
-frace: father’s race (1 = White, 2 = Black, 3 = Asian, 4 = Puerto Rican, 8 = Other, 9 = Unknown)
-gaweeks: gestational age in weeks
-malform: presence of malformations that could affect weight (0 = absent, 1 = present)
-menarche: mother’s age at menarche (years)
-mheigth: mother’s height (inches)
-momage: mother’s age at delivery (years)
-mrace: mother’s race (1 = White, 2 = Black, 3 = Asian, 4 = Puerto Rican, 8 = Other)
-parity: number of live births prior to this pregnancy
-pnumlbw: previous number of low birth weight babies
-pnumgsa: number of prior small for gestational age babies
-ppbmi: mother’s pre-pregnancy BMI
-ppwt: mother’s pre-pregnancy weight (pounds)
-smoken: average number of cigarettes smoked per day during pregnancy
-wtgain: mother’s weight gain during pregnancy (pounds)
-Load and clean the data for regression analysis (i.e. use appropriate variable names, convert numeric to factor where appropriate, check for the presence of missing data, etc.).
+summary(birthweight)
 
-Propose a regression model for birthweight. This model may be based on a hypothesized structure for the factors that underly birthweight, on a data-driven model-building process, or a combination of the two. Describe your modeling process and show a plot of model residuals against fitted values – use add_predictions and add_residuals in making this plot.
+# checking variables to decide which to include in the model
+summary(birthweight)
+```
 
-Compare your model to two others:
+We can see from the summary that the minimum and maximum values for pnumblw and pnumsga are 0, so we will not include these in the model. The mean for parity is also 0.002, so we will not include this in the model either.
 
-One using length at birth and gestational age as predictors (main effects only)
-One using head circumference, length, sex, and all interactions (including the three-way interaction) between these
-Make this comparison in terms of the cross-validated prediction error; use crossv_mc and functions in purrr as appropriate.
+Considering this, in addition to high correlations between certain variables, we will make a linear model.
 
-Note that although we expect your model to be reasonable, model building itself is not a main idea of the course and we don’t necessarily expect your model to be “optimal”.
+The dataset contains `r nrow(birthweight)` children and `r ncol(birthweight)` variables. Sex, father's race, mother's race, and malformation status were converted from numeric codes to factors. No observations fell into the "unknown" category for father's race or the "other" category for mother's race, so these empty levels will be dropped.
 
+The summary shows a few issues:
+
+* `pnumlbw` and `pnumsga` are 0 for every baby, so they contain no information and are to be removed.
+* `parity` is almost always 0 (mean = `r round(mean(birthweight$parity), 3)`), so it is also to be removed.
+* Only `r sum(birthweight$malform == "present")` children have a malformation, which is too few to estimate an effect reliably.
+* `menarche` has a minimum of 0, which is not biologically plausible and is likely a data entry error. It is thus not used in the model.
+
+```{r}
+birthweight = 
+  birthweight |> 
+  mutate(across(c(frace, mrace), fct_drop)) |> 
+  select(-pnumlbw, -pnumsga, -parity)
+```
+
+## Proposed model
+
+I took a hypothesis-driven approach, choosing predictors based on known determinants of fetal growth rather than using automated selection. The model includes:
+
+* Gestational age (`gaweeks`): longer gestation allows more time for fetal growth
+* Smoking (`smoken`): smoking during pregnancy is known to restrict fetal growth
+* Pre-pregnancy BMI (`ppbmi`) and weight gain (`wtgain`): maternal size and gestational weight gain reflect nutritional status and are both associated with fetal size
+* Mother's race (`mrace`): included as a proxy for structural and social factors associated with birthweight
+* Baby's sex (`babysex`): male infants are, on average, slightly heavier at birth
+* Family income (`fincome`): a socioeconomic factor that may influence maternal nutrition and access to prenatal care
+
+Several variables were deliberately excluded:
+
+* Head circumference (`bhead`) and length (`blength`): measures of the baby's size at birth, collected at the same time as the outcome, rather than upstream factors that determine birthweight
+* Pre-pregnancy weight (`ppwt`), weight at delivery (`delwt`), and mother's height (`mheight`): these are redundant with the included variables (`ppbmi` is calculated from weight and height, and `wtgain` = `delwt` − `ppwt`), so including them would introduce multicollinearity
+* Father's race (`frace`): correlated with mother's race
+* Malformations (`malform`), menarche, and mother's age (`momage`): too rare, implausible values, or no strong rationale for inclusion beyond the variables already in the model
+
+```{r}
+birthweight_lm = birthweight |>
+  lm(bwt ~ gaweeks + smoken + ppbmi + wtgain + mrace + babysex + fincome, data = _)
+
+birthweight_lm |>
+  broom::tidy() |>
+  knitr::kable(digits = 3)
+```
+
+```{r}
+birthweight |>
+  modelr::add_predictions(birthweight_lm) |>
+  modelr::add_residuals(birthweight_lm) |>
+  ggplot(aes(x = pred, y = resid)) +
+  geom_point(alpha = 0.3) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    title = "Residuals vs. fitted values for proposed birthweight model",
+    x = "Fitted birthweight (grams)",
+    y = "Residual (grams)"
+  )
+```
+
+The residuals are mostly centered around 0 across the range of fitted values, suggesting a linear model is reasonable for most of the data. However, there are some large residuals, and the spread appears a bit wider at lower fitted values. These likely correspond to very preterm or very small babies, whose birthweight is harder to predict from maternal factors alone.
+
+## Comparison models
+
+Model 1 - length at birth and gestational age as main effects only:
+
+```{r}
+birthweight_lm_2 = birthweight |>
+  lm(bwt ~ blength + gaweeks, data = _)
+
+birthweight_lm_2 |>
+  broom::tidy() |>
+  knitr::kable(digits = 3)
+```
+
+Model 2 - head circumference, length, sex, and all two- and three-way interactions:
+
+```{r}
+birthweight_lm_3 = birthweight |>
+  lm(bwt ~ bhead * blength * babysex, data = _)
+
+birthweight_lm_3 |>
+  broom::tidy() |>
+  knitr::kable(digits = 3)
+```
+
+## Cross-validation
+
+```{r}
+cv_df =
+  crossv_mc(birthweight, 100) |>
+  mutate(
+    train = map(train, as_tibble),
+    test = map(test, as_tibble)
+  ) |>
+  mutate(
+    proposed_mod = map(train, \(df) lm(bwt ~ gaweeks + smoken + ppbmi + wtgain + mrace + babysex + fincome, data = df)),
+    main_mod = map(train, \(df) lm(bwt ~ blength + gaweeks, data = df)),
+    interaction_mod = map(train, \(df) lm(bwt ~ bhead * blength * babysex, data = df))
+  ) |>
+  mutate(
+    rmse_proposed = map2_dbl(proposed_mod, test, \(mod, df) rmse(model = mod, data = df)),
+    rmse_main = map2_dbl(main_mod, test, \(mod, df) rmse(model = mod, data = df)),
+    rmse_interaction = map2_dbl(interaction_mod, test, \(mod, df) rmse(model = mod, data = df))
+  )
+
+rmse_long =
+  cv_df |>
+  select(starts_with("rmse")) |>
+  pivot_longer(
+    everything(),
+    names_to = "model",
+    values_to = "rmse",
+    names_prefix = "rmse_"
+  ) |>
+  mutate(
+    model = fct_inorder(model),
+    model = fct_recode(
+      model,
+      "Proposed" = "proposed",
+      "Length + gestational age" = "main",
+      "Head x length x sex" = "interaction"
+    )
+  )
+
+rmse_long |>
+  ggplot(aes(x = model, y = rmse)) +
+  geom_violin(fill = "pink", alpha = 0.6) +
+  labs(
+    title = "Cross-validated prediction error across 100 train/test splits",
+    x = "Model",
+    y = "RMSE (grams)"
+  )
+
+rmse_summary =
+  rmse_long |>
+  group_by(model) |>
+  summarize(mean_rmse = mean(rmse))
+
+rmse_summary |>
+  knitr::kable(digits = 2)
+```
+
+The interaction model (head circumference, length, sex, and their interactions) has the lowest cross-validated prediction error, with a mean RMSE of about `r round(pull(filter(rmse_summary, model == "Head x length x sex"), mean_rmse), 1)` grams. The main-effects model using length and gestational age performs slightly worse (mean RMSE = `r round(pull(filter(rmse_summary, model == "Length + gestational age"), mean_rmse), 1)` grams). My proposed model has the highest prediction error (mean RMSE = `r round(pull(filter(rmse_summary, model == "Proposed"), mean_rmse), 1)` grams).
+
+This result is expected as head circumference and length are measured at birth and are direct measures of the baby's size, so they are strong proxies for birthweight and predict it very well. I deliberately excluded these and instead uses maternal and pregnancy factors that occur before birth. It therefore sacrifices predictive accuracy, but is more useful for understanding which modifiable or structural factors are associated with birthweight.
